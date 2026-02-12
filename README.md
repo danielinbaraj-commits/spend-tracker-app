@@ -1,81 +1,116 @@
 # Spend Tracker (Telegram + Azure Logic Apps + Excel on OneDrive)
 
-This repo contains a ready-to-import Azure Logic App workflow that lets you track expenses from Telegram and save them into an Excel table stored in OneDrive.
+This repository provides a deployable spend tracker that captures Telegram bot commands and writes expense rows into an Excel table in OneDrive.
 
 ## Architecture
 
-1. You send a message to your Telegram bot, e.g.:
-   - `/add 12.50 Food Lunch`
-   - `/help`
-2. Telegram calls your Logic App webhook URL.
-3. Logic App parses the command.
-4. Logic App writes a new row into an Excel table in OneDrive.
-5. Logic App sends a confirmation message back to Telegram.
+1. User sends a Telegram message like `/add 12.50 Food Lunch`.
+2. Telegram webhook calls Azure Logic App HTTP trigger.
+3. Logic App parses command and validates arguments.
+4. Logic App inserts a row into Excel table (`ExpensesTable`) through `excelonlinebusiness` connector.
+5. Logic App replies in Telegram.
 
-## Repository contents
+## Files
 
-- `logicapp/workflow.json` – Logic App workflow definition (Consumption-style JSON).
-- `excel/spend-tracker-template.csv` – starter data shape for your Excel table.
-
----
-
-## 1) Create Telegram bot
-
-1. Open Telegram and message `@BotFather`.
-2. Run `/newbot` and finish setup.
-3. Save your bot token (looks like `123456:ABC-DEF...`).
+- `logicapp/workflow.json` – workflow definition.
+- `infra/main.bicep` – deploys Logic App and wires runtime parameters.
+- `infra/parameters.example.json` – example deployment parameters.
+- `scripts/deploy.sh` – one-command deploy + webhook registration.
+- `excel/spend-tracker-template.csv` – starter Excel table columns and sample row.
 
 ---
 
-## 2) Create Excel file in OneDrive
+## Prerequisites
 
-1. Create a file in OneDrive named `SpendTracker.xlsx`.
-2. Create a worksheet named `Expenses`.
-3. Add an Excel **Table** (Insert -> Table), named exactly: `ExpensesTable`.
-4. Use these columns in row 1:
+- Azure subscription.
+- Azure CLI (`az`) logged in: `az login`.
+- Telegram bot token from `@BotFather`.
+- OneDrive Excel file with an `ExpensesTable` table.
+- Existing `excelonlinebusiness` API connection in Azure (authorized to your OneDrive account).
 
-- `Date`
-- `Amount`
-- `Category`
-- `Note`
-- `ChatId`
-- `RawCommand`
-
-You can copy from `excel/spend-tracker-template.csv`.
+> Why existing connection first? The Excel connector requires an authenticated OAuth connection. This is easiest to create once in the Azure portal, then reuse the connection resource id in deployment.
 
 ---
 
-## 3) Deploy Logic App
+## 1) Create Telegram Bot
 
-### Option A: Portal designer (quickest)
-
-1. Create a Logic App (Consumption).
-2. Open **Code view**.
-3. Paste the content from `logicapp/workflow.json`.
-4. Save.
-
-### Option B: ARM/Bicep integration
-
-Use `logicapp/workflow.json` as the workflow definition for your Logic App resource.
+1. Open Telegram and chat with `@BotFather`.
+2. Run `/newbot`.
+3. Save bot token.
 
 ---
 
-## 4) Configure workflow parameters
+## 2) Create Excel file/table in OneDrive
 
-Set these Logic App parameters in the workflow:
+1. Create `SpendTracker.xlsx`.
+2. Create worksheet `Expenses`.
+3. Create table named exactly `ExpensesTable`.
+4. Columns (header row):
+   - `Date`
+   - `Amount`
+   - `Category`
+   - `Note`
+   - `ChatId`
+   - `RawCommand`
 
-- `telegramBotToken` – your Telegram bot token.
-- `oneDriveDriveId` – OneDrive drive id (or keep default `me` if your connector supports it).
-- `excelFileId` – file id of `SpendTracker.xlsx`.
-- `excelTableId` – table id/name (`ExpensesTable`).
-
-Also ensure your API connection parameter `$connections` points to a valid `excelonlinebusiness` connection.
+You can copy headers from `excel/spend-tracker-template.csv`.
 
 ---
 
-## 5) Register Telegram webhook
+## 3) Create Excel API connection in Azure (one time)
 
-After saving the Logic App, copy the HTTP trigger URL and run:
+In Azure Portal:
+
+1. Go to **API connections**.
+2. Create connection for **Excel Online (Business)**.
+3. Authenticate with the same OneDrive account that owns `SpendTracker.xlsx`.
+4. Copy resource id, for example:
+
+`/subscriptions/<sub>/resourceGroups/<rg>/providers/Microsoft.Web/connections/excelonlinebusiness-1`
+
+---
+
+## 4) Deploy Logic App
+
+### Quick deploy (recommended)
+
+Set environment variables:
+
+```bash
+export AZ_RESOURCE_GROUP="<resource-group>"
+export AZ_LOCATION="eastus"
+export WORKFLOW_NAME="spend-tracker-la"
+export TELEGRAM_BOT_TOKEN="<telegram-token>"
+export EXCEL_FILE_ID="<excel-file-id>"
+export EXCEL_CONNECTION_ID="/subscriptions/<sub>/resourceGroups/<rg>/providers/Microsoft.Web/connections/<excel-connection-name>"
+# Optional:
+# export ONE_DRIVE_DRIVE_ID="me"
+# export EXCEL_TABLE_ID="ExpensesTable"
+```
+
+Run:
+
+```bash
+./scripts/deploy.sh
+```
+
+This script:
+
+- creates/uses the resource group,
+- deploys `infra/main.bicep`,
+- fetches Logic App callback URL,
+- registers Telegram webhook automatically.
+
+### Manual deploy
+
+```bash
+az deployment group create \
+  --resource-group <resource-group> \
+  --template-file infra/main.bicep \
+  --parameters @infra/parameters.example.json
+```
+
+Then get callback URL from Logic App trigger and set webhook:
 
 ```bash
 curl -X POST "https://api.telegram.org/bot<YOUR_BOT_TOKEN>/setWebhook" \
@@ -83,25 +118,21 @@ curl -X POST "https://api.telegram.org/bot<YOUR_BOT_TOKEN>/setWebhook" \
   -d '{"url":"<YOUR_LOGIC_APP_TRIGGER_URL>"}'
 ```
 
-Test:
-
-- Send `/help`
-- Send `/add 9.99 Coffee Cappuccino`
-
 ---
 
-## Supported bot commands
+## Supported commands
 
 - `/add <amount> <category> <note...>`
   - Example: `/add 25.40 Transport Metro card`
 - `/help`
+- `/start`
 
-If the format is invalid, bot responds with usage instructions.
+If `/add` format is invalid, bot replies with usage.
 
 ---
 
 ## Notes
 
-- The workflow accepts Telegram update payloads via webhook.
-- For production, rotate your bot token regularly and restrict Logic App access as needed.
-- If you want summaries (`/summary` daily/monthly), add a second flow that reads rows from Excel and aggregates totals.
+- Amount is currently stored as provided text value from Telegram command.
+- For reporting (`/summary` monthly), add another workflow that reads and aggregates Excel rows.
+- Keep bot token secure and rotate if exposed.

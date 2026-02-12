@@ -1,0 +1,24 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "workflowName": {
+      "value": "spend-tracker-la"
+    },
+    "telegramBotToken": {
+      "value": "<BOT_TOKEN>"
+    },
+    "oneDriveDriveId": {
+      "value": "me"
+    },
+    "excelFileId": {
+      "value": "<EXCEL_FILE_ID>"
+    },
+    "excelTableId": {
+      "value": "ExpensesTable"
+    },
+    "excelConnectionId": {
+      "value": "/subscriptions/<SUB_ID>/resourceGroups/<RG>/providers/Microsoft.Web/connections/<EXCEL_CONNECTION_NAME>"
+    }
+  }
+}
