@@ -15,7 +15,8 @@ This repository provides a deployable spend tracker that captures Telegram bot c
 - `logicapp/workflow.json` – workflow definition.
 - `infra/main.bicep` – deploys Logic App and wires runtime parameters.
 - `infra/parameters.example.json` – example deployment parameters.
-- `scripts/deploy.sh` – one-command deploy + webhook registration.
+- `scripts/deploy.sh` – Linux/macOS bash deployment script.
+- `scripts/deploy.ps1` – Windows PowerShell deployment script.
 - `excel/spend-tracker-template.csv` – starter Excel table columns and sample row.
 
 ---
@@ -23,7 +24,7 @@ This repository provides a deployable spend tracker that captures Telegram bot c
 ## Prerequisites
 
 - Azure subscription.
-- Azure CLI (`az`) logged in: `az login`.
+- Azure CLI (`az`) installed and logged in: `az login`.
 - Telegram bot token from `@BotFather`.
 - OneDrive Excel file with an `ExpensesTable` table.
 - Existing `excelonlinebusiness` API connection in Azure (authorized to your OneDrive account).
@@ -32,7 +33,32 @@ This repository provides a deployable spend tracker that captures Telegram bot c
 
 ---
 
-## 1) Create Telegram Bot
+## 1) Install Azure CLI
+
+### Windows (recommended for your laptop)
+
+Install using winget:
+
+```powershell
+winget install -e --id Microsoft.AzureCLI
+az version
+az login
+```
+
+Or install MSI directly: <https://aka.ms/installazurecliwindows>
+
+### Linux/macOS
+
+Use Microsoft installer docs for your distro/shell, then run:
+
+```bash
+az version
+az login
+```
+
+---
+
+## 2) Create Telegram Bot
 
 1. Open Telegram and chat with `@BotFather`.
 2. Run `/newbot`.
@@ -40,7 +66,7 @@ This repository provides a deployable spend tracker that captures Telegram bot c
 
 ---
 
-## 2) Create Excel file/table in OneDrive
+## 3) Create Excel file/table in OneDrive
 
 1. Create `SpendTracker.xlsx`.
 2. Create worksheet `Expenses`.
@@ -57,7 +83,7 @@ You can copy headers from `excel/spend-tracker-template.csv`.
 
 ---
 
-## 3) Create Excel API connection in Azure (one time)
+## 4) Create Excel API connection in Azure (one time)
 
 In Azure Portal:
 
@@ -70,11 +96,31 @@ In Azure Portal:
 
 ---
 
-## 4) Deploy Logic App
+## 5) Deploy Logic App
 
-### Quick deploy (recommended)
+### Option A: Windows PowerShell (best for Windows laptops)
 
-Set environment variables:
+Set environment variables in PowerShell:
+
+```powershell
+$env:AZ_RESOURCE_GROUP="<resource-group>"
+$env:AZ_LOCATION="eastus"
+$env:WORKFLOW_NAME="spend-tracker-la"
+$env:TELEGRAM_BOT_TOKEN="<telegram-token>"
+$env:EXCEL_FILE_ID="<excel-file-id>"
+$env:EXCEL_CONNECTION_ID="/subscriptions/<sub>/resourceGroups/<rg>/providers/Microsoft.Web/connections/<excel-connection-name>"
+# Optional:
+# $env:ONE_DRIVE_DRIVE_ID="me"
+# $env:EXCEL_TABLE_ID="ExpensesTable"
+```
+
+Deploy and register webhook automatically:
+
+```powershell
+./scripts/deploy.ps1
+```
+
+### Option B: Linux/macOS bash
 
 ```bash
 export AZ_RESOURCE_GROUP="<resource-group>"
@@ -86,22 +132,11 @@ export EXCEL_CONNECTION_ID="/subscriptions/<sub>/resourceGroups/<rg>/providers/M
 # Optional:
 # export ONE_DRIVE_DRIVE_ID="me"
 # export EXCEL_TABLE_ID="ExpensesTable"
-```
 
-Run:
-
-```bash
 ./scripts/deploy.sh
 ```
 
-This script:
-
-- creates/uses the resource group,
-- deploys `infra/main.bicep`,
-- fetches Logic App callback URL,
-- registers Telegram webhook automatically.
-
-### Manual deploy
+### Option C: Manual `az deployment`
 
 ```bash
 az deployment group create \
