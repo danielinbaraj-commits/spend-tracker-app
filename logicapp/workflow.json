@@ -1,0 +1,261 @@
+{
+  "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "telegramBotToken": {
+      "type": "String",
+      "defaultValue": ""
+    },
+    "oneDriveDriveId": {
+      "type": "String",
+      "defaultValue": "me"
+    },
+    "excelFileId": {
+      "type": "String",
+      "defaultValue": ""
+    },
+    "excelTableId": {
+      "type": "String",
+      "defaultValue": "ExpensesTable"
+    },
+    "$connections": {
+      "type": "Object",
+      "defaultValue": {}
+    }
+  },
+  "triggers": {
+    "When_a_HTTP_request_is_received": {
+      "type": "Request",
+      "kind": "Http",
+      "inputs": {
+        "method": "POST",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "message": {
+              "type": "object",
+              "properties": {
+                "message_id": {
+                  "type": "integer"
+                },
+                "text": {
+                  "type": "string"
+                },
+                "chat": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "actions": {
+    "Compose_chat_id": {
+      "runAfter": {},
+      "type": "Compose",
+      "inputs": "@{string(triggerBody()?['message']?['chat']?['id'])}"
+    },
+    "Compose_text": {
+      "runAfter": {
+        "Compose_chat_id": [
+          "Succeeded"
+        ]
+      },
+      "type": "Compose",
+      "inputs": "@{trim(coalesce(triggerBody()?['message']?['text'], ''))}"
+    },
+    "Condition_Is_Add_Command": {
+      "runAfter": {
+        "Compose_text": [
+          "Succeeded"
+        ]
+      },
+      "type": "If",
+      "expression": {
+        "and": [
+          {
+            "startsWith": [
+              "@{outputs('Compose_text')}",
+              "/add "
+            ]
+          }
+        ]
+      },
+      "actions": {
+        "Compose_Add_Payload": {
+          "type": "Compose",
+          "inputs": "@{trim(replace(outputs('Compose_text'), '/add', ''))}"
+        },
+        "Compose_Parts": {
+          "runAfter": {
+            "Compose_Add_Payload": [
+              "Succeeded"
+            ]
+          },
+          "type": "Compose",
+          "inputs": "@{split(outputs('Compose_Add_Payload'), ' ')}"
+        },
+        "Condition_Has_Minimum_Arguments": {
+          "runAfter": {
+            "Compose_Parts": [
+              "Succeeded"
+            ]
+          },
+          "type": "If",
+          "expression": {
+            "and": [
+              {
+                "greaterOrEquals": [
+                  "@{length(outputs('Compose_Parts'))}",
+                  2
+                ]
+              }
+            ]
+          },
+          "actions": {
+            "Add_a_row_into_a_table": {
+              "type": "ApiConnection",
+              "inputs": {
+                "host": {
+                  "connection": {
+                    "name": "@parameters('$connections')['excelonlinebusiness']['connectionId']"
+                  }
+                },
+                "method": "post",
+                "path": "/drives/@{encodeURIComponent(parameters('oneDriveDriveId'))}/files/@{encodeURIComponent(parameters('excelFileId'))}/tables/@{encodeURIComponent(parameters('excelTableId'))}/items",
+                "body": {
+                  "Date": "@{utcNow()}",
+                  "Amount": "@{first(outputs('Compose_Parts'))}",
+                  "Category": "@{if(greater(length(outputs('Compose_Parts')), 1), first(skip(outputs('Compose_Parts'), 1)), 'Uncategorized')}",
+                  "Note": "@{if(greater(length(outputs('Compose_Parts')), 2), join(skip(outputs('Compose_Parts'), 2), ' '), '')}",
+                  "ChatId": "@{outputs('Compose_chat_id')}",
+                  "RawCommand": "@{outputs('Compose_text')}"
+                }
+              }
+            },
+            "Send_Telegram_Success": {
+              "runAfter": {
+                "Add_a_row_into_a_table": [
+                  "Succeeded"
+                ]
+              },
+              "type": "Http",
+              "inputs": {
+                "method": "POST",
+                "uri": "@{concat('https://api.telegram.org/bot', parameters('telegramBotToken'), '/sendMessage')}",
+                "headers": {
+                  "Content-Type": "application/json"
+                },
+                "body": {
+                  "chat_id": "@{outputs('Compose_chat_id')}",
+                  "text": "@{concat('Saved expense: ', first(outputs('Compose_Parts')), ' ', if(greater(length(outputs('Compose_Parts')), 1), first(skip(outputs('Compose_Parts'), 1)), 'Uncategorized'))}"
+                }
+              }
+            }
+          },
+          "else": {
+            "actions": {
+              "Send_Telegram_Add_Usage": {
+                "type": "Http",
+                "inputs": {
+                  "method": "POST",
+                  "uri": "@{concat('https://api.telegram.org/bot', parameters('telegramBotToken'), '/sendMessage')}",
+                  "headers": {
+                    "Content-Type": "application/json"
+                  },
+                  "body": {
+                    "chat_id": "@{outputs('Compose_chat_id')}",
+                    "text": "Usage: /add <amount> <category> <note...>"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "else": {
+        "actions": {
+          "Condition_Is_Help_Command": {
+            "type": "If",
+            "expression": {
+              "or": [
+                {
+                  "equals": [
+                    "@{outputs('Compose_text')}",
+                    "/help"
+                  ]
+                },
+                {
+                  "equals": [
+                    "@{outputs('Compose_text')}",
+                    "/start"
+                  ]
+                }
+              ]
+            },
+            "actions": {
+              "Send_Telegram_Help": {
+                "type": "Http",
+                "inputs": {
+                  "method": "POST",
+                  "uri": "@{concat('https://api.telegram.org/bot', parameters('telegramBotToken'), '/sendMessage')}",
+                  "headers": {
+                    "Content-Type": "application/json"
+                  },
+                  "body": {
+                    "chat_id": "@{outputs('Compose_chat_id')}",
+                    "text": "Spend Tracker commands:\n/add <amount> <category> <note...>\nExample: /add 9.99 Coffee Cappuccino"
+                  }
+                }
+              }
+            },
+            "else": {
+              "actions": {
+                "Send_Telegram_Default": {
+                  "type": "Http",
+                  "inputs": {
+                    "method": "POST",
+                    "uri": "@{concat('https://api.telegram.org/bot', parameters('telegramBotToken'), '/sendMessage')}",
+                    "headers": {
+                      "Content-Type": "application/json"
+                    },
+                    "body": {
+                      "chat_id": "@{outputs('Compose_chat_id')}",
+                      "text": "Unknown command. Send /help"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "Response": {
+      "runAfter": {
+        "Condition_Is_Add_Command": [
+          "Succeeded",
+          "Failed",
+          "Skipped",
+          "TimedOut"
+        ]
+      },
+      "type": "Response",
+      "kind": "Http",
+      "inputs": {
+        "statusCode": 200,
+        "body": {
+          "ok": true
+        }
+      }
+    }
+  },
+  "outputs": {}
+}
